@@ -1,0 +1,30 @@
+/* ui/styles.qss */
+
+QMainWindow {
+    background-color: #f0f0f0;
+}
+
+QPushButton {
+    padding: 6px;
+    border-radius: 4px;
+}
+
+QPushButton:hover {
+    background-color: #d0d0d0;
+}
+
+QTableWidget {
+    gridline-color: #ccc;
+}
+
+QHeaderView::section {
+    background-color: #e0e0e0;
+    padding: 4px;
+    border: 1px solid #ccc;
+}
+
+QLineEdit, QComboBox {
+    padding: 4px;
+    border: 1px solid #aaa;
+    border-radius: 3px;
+}
