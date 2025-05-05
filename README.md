@@ -27,7 +27,6 @@
 1. Клонировать репозиторий:
     ```bash
     git clone https://…/salary_system.git
-    cd salary_system
     ```
 2. Создать и активировать виртуальное окружение:
     ```bash
