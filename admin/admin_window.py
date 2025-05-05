@@ -1,14 +1,14 @@
-
 # admin/admin_window.py
 
 from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QTabWidget, QTableWidget, QTableWidgetItem,
-    QLabel, QLineEdit, QMessageBox, QHeaderView, QComboBox, QFormLayout, QTextEdit
+    QLabel, QLineEdit, QMessageBox, QHeaderView, QComboBox, QFormLayout, QTextEdit, QFileDialog
 )
 from PyQt5.QtCore import Qt
 import matplotlib.pyplot as plt
 from datetime import datetime
+from sqlalchemy.orm import joinedload
 
 from database.db_init import SessionLocal
 from database.models import (
@@ -119,7 +119,6 @@ class AdminWindow(QMainWindow):
             self._refresh_employees()
 
     def _handle_add_employee(self):
-        # parent=self, чтобы диалог был модальным относительно этого окна
         if self.manager.add_employee_dialog(self):
             self._refresh_employees()
 
@@ -172,15 +171,12 @@ class AdminWindow(QMainWindow):
 
         self.salary_table.setRowCount(len(records))
         for i, (emp, s) in enumerate(records):
-            # readonly: ID, ФИО, Месяц
             for col, txt in enumerate([emp.id, emp.full_name, s.month]):
                 item = QTableWidgetItem(str(txt))
                 item.setFlags(item.flags() & ~Qt.ItemIsEditable)
                 self.salary_table.setItem(i, col, item)
-            # editable: Премии, Начислено
             self.salary_table.setItem(i, 3, QTableWidgetItem(str(s.bonus)))
             self.salary_table.setItem(i, 4, QTableWidgetItem(str(s.gross)))
-            # readonly: НДФЛ, К выплате
             for col, val in ((5, s.ndfl), (6, s.payout)):
                 itm = QTableWidgetItem(str(val))
                 itm.setFlags(itm.flags() & ~Qt.ItemIsEditable)
@@ -424,17 +420,28 @@ class AdminWindow(QMainWindow):
 
     def _show_dashboard(self):
         month = self.report_month.text().strip()
-        recs  = self.db.query(Salary).filter(Salary.month == month).all()
+        recs  = (
+            self.db.query(Salary)
+                   .join(Employee)
+                   .options(joinedload(Salary.employee))
+                   .filter(Salary.month == month)
+                   .all()
+        )
         xs    = [r.employee.full_name for r in recs]
         ys1   = [r.gross for r in recs]
         ys2   = [r.payout for r in recs]
+
         plt.figure()
-        plt.plot(xs, ys1)
-        plt.plot(xs, ys2)
+        plt.plot(xs, ys1, label="Начислено (gross)")
+        plt.plot(xs, ys2, label="К выплате (payout)")
         plt.title(f"Dashboard за {month}")
+        plt.xlabel("Сотрудник")
+        plt.ylabel("Сумма, руб.")
         plt.xticks(rotation=45, ha="right")
+        plt.legend()
         plt.tight_layout()
         plt.show()
+
         self.db.add(ActionLog(
             user_id=self.user.id,
             action="view_dashboard",
@@ -536,4 +543,3 @@ class AdminWindow(QMainWindow):
         self.reply_edit.clear()
         self._refresh_messages()
         QMessageBox.information(self, "Успех", "Ответ отправлен")
-        
