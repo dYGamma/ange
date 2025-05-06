@@ -3,11 +3,12 @@
 from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QTabWidget, QTableWidget, QTableWidgetItem,
-    QLabel, QLineEdit, QMessageBox, QHeaderView, QComboBox, QFormLayout, QTextEdit, QFileDialog
+    QLabel, QLineEdit, QMessageBox, QHeaderView, QComboBox,
+    QFormLayout, QTextEdit
 )
-from PyQt5.QtCore import Qt
-import matplotlib.pyplot as plt
+from PyQt5.QtCore import Qt, pyqtSignal
 from datetime import datetime
+import matplotlib.pyplot as plt
 from sqlalchemy.orm import joinedload
 
 from database.db_init import SessionLocal
@@ -21,6 +22,9 @@ from admin.excel_exporter import ExcelExporter
 
 
 class AdminWindow(QMainWindow):
+    # Сигнал для смены пользователя
+    logout_requested = pyqtSignal()
+
     def __init__(self, user):
         super().__init__()
         self.user = user
@@ -33,6 +37,13 @@ class AdminWindow(QMainWindow):
         self.calculator = SalaryCalculator(self.db)
         self.exporter   = ExcelExporter()
 
+        # По сигналу logout закрываем окно
+        self.logout_requested.connect(self.close)
+
+        # Кнопка смены пользователя
+        btn_logout = QPushButton("Сменить пользователя")
+        btn_logout.clicked.connect(self._on_logout)
+
         # Создание вкладок
         tabs = QTabWidget()
         tabs.addTab(self._create_employees_tab(),  "Сотрудники")
@@ -42,19 +53,21 @@ class AdminWindow(QMainWindow):
         tabs.addTab(self._create_report_tab(),     "Отчёты")
         tabs.addTab(self._create_messages_tab(),   "Сообщения")
 
+        # Компоновка центрального виджета
         central = QWidget()
         layout  = QVBoxLayout(central)
+        top_hlay = QHBoxLayout()
+        top_hlay.addStretch()
+        top_hlay.addWidget(btn_logout)
+        layout.addLayout(top_hlay)
         layout.addWidget(tabs)
         self.setCentralWidget(central)
 
+    def _on_logout(self):
+        """Эмитим сигнал, чтобы main() снова показал окно логина."""
+        self.logout_requested.emit()
+
     def _setup_table(self, table: QTableWidget, headers: list[str]):
-        """
-        Общая настройка таблицы:
-        - Растягивание колонок
-        - Перенос текста
-        - Скрытие скроллбаров
-        - Автоматическое изменение высоты строк
-        """
         table.setColumnCount(len(headers))
         table.setHorizontalHeaderLabels(headers)
         hdr = table.horizontalHeader()
@@ -63,6 +76,18 @@ class AdminWindow(QMainWindow):
         table.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         table.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         table.resizeRowsToContents()
+
+    def _reload_employee_selectors(self):
+        """Обновить списки сотрудников в combo-боксах бонусов и переработок."""
+        emps = self.db.query(Employee).all()
+        if hasattr(self, 'b_emp_cb'):
+            self.b_emp_cb.clear()
+            for e in emps:
+                self.b_emp_cb.addItem(f"{e.id} {e.full_name}", e.id)
+        if hasattr(self, 'o_emp_cb'):
+            self.o_emp_cb.clear()
+            for e in emps:
+                self.o_emp_cb.addItem(f"{e.id} {e.full_name}", e.id)
 
     # ————————— Таблица «Сотрудники» —————————————————————————————
     def _create_employees_tab(self) -> QWidget:
@@ -117,10 +142,14 @@ class AdminWindow(QMainWindow):
                                 f"Удалить сотрудника ID={emp_id}?") == QMessageBox.Yes:
             self.manager.delete(emp_id)
             self._refresh_employees()
+            self._reload_employee_selectors()
+            self._refresh_salary_table()
 
     def _handle_add_employee(self):
         if self.manager.add_employee_dialog(self):
             self._refresh_employees()
+            self._reload_employee_selectors()
+            self._refresh_salary_table()
 
     # ————————— Таблица «Расчёт» —————————————————————————————————
     def _create_salary_tab(self) -> QWidget:
@@ -153,12 +182,10 @@ class AdminWindow(QMainWindow):
         month = self.calculator.current_month()
         emps = self.db.query(Employee).all()
         records = []
+        from database.models import Salary as SM
         for emp in emps:
-            sal = (self.db.query(Salary)
-                   .filter_by(employee_id=emp.id, month=month)
-                   .first())
+            sal = self.db.query(SM).filter_by(employee_id=emp.id, month=month).first()
             if not sal:
-                from database.models import Salary as SM
                 sal = SM(
                     employee_id=emp.id, month=month,
                     bonus=0.0, overtime_sum=0.0,
@@ -192,9 +219,7 @@ class AdminWindow(QMainWindow):
             emp_id = int(self.salary_table.item(r, 0).text())
             bonus = float(self.salary_table.item(r, 3).text())
             gross = float(self.salary_table.item(r, 4).text())
-            rec = (self.db.query(Salary)
-                   .filter_by(employee_id=emp_id, month=month)
-                   .first())
+            rec = self.db.query(Salary).filter_by(employee_id=emp_id, month=month).first()
             rec.bonus = bonus
             rec.gross = gross
             self.db.add(ActionLog(
@@ -235,17 +260,18 @@ class AdminWindow(QMainWindow):
         w    = QWidget()
         vlay = QVBoxLayout(w)
         form = QFormLayout()
+
         self.b_emp_cb    = QComboBox()
-        for e in self.db.query(Employee).all():
-            self.b_emp_cb.addItem(f"{e.id} {e.full_name}", e.id)
         self.b_month_le  = QLineEdit(datetime.now().strftime("%m.%Y"))
         self.b_amount_le = QLineEdit()
+
         form.addRow("Сотрудник:", self.b_emp_cb)
         form.addRow("Месяц:",      self.b_month_le)
         form.addRow("Сумма:",      self.b_amount_le)
+        vlay.addLayout(form)
+
         btn_add = QPushButton("Добавить")
         btn_add.clicked.connect(self._add_bonus)
-        vlay.addLayout(form)
         vlay.addWidget(btn_add)
 
         self.bonus_table = QTableWidget()
@@ -256,15 +282,24 @@ class AdminWindow(QMainWindow):
         btn_del.clicked.connect(self._del_bonus)
         vlay.addWidget(btn_del)
 
+        self._reload_employee_selectors()
         self._refresh_bonus()
+
         return w
 
     def _refresh_bonus(self):
-        recs = self.db.query(Bonus).all()
+        month = self.b_month_le.text().strip()
+        recs = (
+            self.db.query(Bonus)
+                   .join(Employee)
+                   .filter(Bonus.month == month)
+                   .all()
+        )
         self.bonus_table.setRowCount(len(recs))
         for i, b in enumerate(recs):
+            emp = b.employee
             self.bonus_table.setItem(i, 0, QTableWidgetItem(str(b.id)))
-            self.bonus_table.setItem(i, 1, QTableWidgetItem(b.employee.full_name))
+            self.bonus_table.setItem(i, 1, QTableWidgetItem(emp.full_name))
             self.bonus_table.setItem(i, 2, QTableWidgetItem(b.month))
             self.bonus_table.setItem(i, 3, QTableWidgetItem(str(b.amount)))
 
@@ -305,17 +340,18 @@ class AdminWindow(QMainWindow):
         w    = QWidget()
         vlay = QVBoxLayout(w)
         form = QFormLayout()
+
         self.o_emp_cb    = QComboBox()
-        for e in self.db.query(Employee).all():
-            self.o_emp_cb.addItem(f"{e.id} {e.full_name}", e.id)
         self.o_date_le   = QLineEdit(datetime.now().strftime("%Y-%m-%d"))
         self.o_hours_le  = QLineEdit()
+
         form.addRow("Сотрудник:", self.o_emp_cb)
         form.addRow("Дата:",       self.o_date_le)
         form.addRow("Часы:",       self.o_hours_le)
+        vlay.addLayout(form)
+
         btn_add = QPushButton("Добавить")
         btn_add.clicked.connect(self._add_overtime)
-        vlay.addLayout(form)
         vlay.addWidget(btn_add)
 
         self.ot_table = QTableWidget()
@@ -326,15 +362,18 @@ class AdminWindow(QMainWindow):
         btn_del.clicked.connect(self._del_overtime)
         vlay.addWidget(btn_del)
 
+        self._reload_employee_selectors()
         self._refresh_overtime()
+
         return w
 
     def _refresh_overtime(self):
         recs = self.db.query(Overtime).all()
         self.ot_table.setRowCount(len(recs))
         for i, o in enumerate(recs):
+            name = o.employee.full_name if o.employee else "—"
             self.ot_table.setItem(i, 0, QTableWidgetItem(str(o.id)))
-            self.ot_table.setItem(i, 1, QTableWidgetItem(o.employee.full_name))
+            self.ot_table.setItem(i, 1, QTableWidgetItem(name))
             self.ot_table.setItem(i, 2, QTableWidgetItem(o.date.strftime("%Y-%m-%d")))
             self.ot_table.setItem(i, 3, QTableWidgetItem(str(o.hours)))
             self.ot_table.setItem(i, 4, QTableWidgetItem(str(o.multiplier)))
@@ -427,9 +466,9 @@ class AdminWindow(QMainWindow):
                    .filter(Salary.month == month)
                    .all()
         )
-        xs    = [r.employee.full_name for r in recs]
-        ys1   = [r.gross for r in recs]
-        ys2   = [r.payout for r in recs]
+        xs    = [r.employee.full_name for r in recs if r.employee]
+        ys1   = [r.gross for r in recs if r.employee]
+        ys2   = [r.payout for r in recs if r.employee]
 
         plt.figure()
         plt.plot(xs, ys1, label="Начислено (gross)")
@@ -450,10 +489,7 @@ class AdminWindow(QMainWindow):
         self.db.commit()
 
     def _refresh_logs(self):
-        logs = (self.db.query(ActionLog)
-                .order_by(ActionLog.ts.desc())
-                .limit(50)
-                .all())
+        logs = self.db.query(ActionLog).order_by(ActionLog.ts.desc()).limit(50).all()
         self.log_table.setRowCount(len(logs))
         for i, lg in enumerate(logs):
             self.log_table.setItem(i, 0, QTableWidgetItem(str(lg.id)))
@@ -479,9 +515,8 @@ class AdminWindow(QMainWindow):
         btn_mark.clicked.connect(self._mark_read)
         btn_reply   = QPushButton("Ответить")
         btn_reply.clicked.connect(self._reply_message)
-        hl.addWidget(btn_refresh)
-        hl.addWidget(btn_mark)
-        hl.addWidget(btn_reply)
+        for btn in (btn_refresh, btn_mark, btn_reply):
+            hl.addWidget(btn)
         hl.addStretch()
         vlay.addLayout(hl)
 
@@ -493,14 +528,14 @@ class AdminWindow(QMainWindow):
         return w
 
     def _refresh_messages(self):
-        recs = (self.db.query(SupportMessage)
-                .filter(SupportMessage.to_user_id == self.user.id)
-                .order_by(SupportMessage.ts.desc())
-                .all())
+        recs = self.db.query(SupportMessage)\
+                      .filter(SupportMessage.to_user_id == self.user.id)\
+                      .order_by(SupportMessage.ts.desc()).all()
         self.msg_table.setRowCount(len(recs))
         for i, m in enumerate(recs):
+            sender = m.sender.full_name if m.sender else "—"
             self.msg_table.setItem(i, 0, QTableWidgetItem(str(m.id)))
-            self.msg_table.setItem(i, 1, QTableWidgetItem(m.sender.full_name))
+            self.msg_table.setItem(i, 1, QTableWidgetItem(sender))
             self.msg_table.setItem(i, 2, QTableWidgetItem(m.text))
             self.msg_table.setItem(i, 3, QTableWidgetItem(m.ts.strftime("%Y-%m-%d %H:%M")))
             chk = "Да" if m.is_read else "Нет"

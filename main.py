@@ -7,26 +7,33 @@ from employee.employee_window import EmployeeWindow
 from admin.admin_window import AdminWindow
 
 def main():
-    # Инициализируем БД (создаёт файлы и таблицы, если нужно)
     init_db()
-
     app = QApplication(sys.argv)
-    apply_theme(app)  # светлая/тёмная тема из qt-material
+    apply_theme(app)
 
-    # Окно логина
-    login_dialog = LoginWindow()
-    if login_dialog.exec_() == QDialog.Accepted:
+    while True:
+        # 1) Показываем диалог логина
+        login_dialog = LoginWindow()
+        if login_dialog.exec_() != QDialog.Accepted:
+            # либо отмена, либо крестик — выходим из цикла
+            break
+
         user = login_dialog.current_user
-        # В зависимости от роли открываем нужный интерфейс
+        # 2) В зависимости от роли создаём нужное окно
         if user.position.lower() in ("бухгалтер", "admin", "accountant"):
             window = AdminWindow(user)
         else:
             window = EmployeeWindow(user)
+
+        # 3) Показываем окно, и ждём, пока оно закроется (в том числе по logout)
         window.show()
-        sys.exit(app.exec_())
-    else:
-        # Пользователь не залогинился или закрыл окно
-        sys.exit(0)
+        app.exec_()
+
+        # После закрытия окна (self.close()) мы снова окажемся в этом цикле
+        # и покажем логин повторно.
+
+    # Вышли из цикла — полностью завершаем приложение
+    sys.exit(0)
 
 if __name__ == "__main__":
     main()

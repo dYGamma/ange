@@ -7,7 +7,7 @@ from PyQt5.QtWidgets import (
     QLineEdit, QTabWidget, QMessageBox, QHeaderView
 )
 from PyQt5.QtGui import QPixmap
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, pyqtSignal
 from database.db_init import SessionLocal
 from database.models import Salary, SupportMessage, Employee
 from employee.payslip_generator import PayslipGenerator
@@ -15,6 +15,9 @@ from datetime import datetime
 import os
 
 class EmployeeWindow(QMainWindow):
+    # Сигнал для смены пользователя
+    logout_requested = pyqtSignal()
+
     def __init__(self, user):
         super().__init__()
         self.user = user
@@ -23,14 +26,33 @@ class EmployeeWindow(QMainWindow):
         self.setWindowTitle(f"Личный кабинет — {user.full_name}")
         self.resize(1024, 640)
 
+        # При логауте закрываем окно
+        self.logout_requested.connect(self.close)
+
+        # Кнопка «Сменить пользователя»
+        btn_logout = QPushButton("Сменить пользователя")
+        btn_logout.clicked.connect(self._on_logout)
+
+        # Табуляция
         tabs = QTabWidget()
         tabs.addTab(self._create_salary_tab(),  "Моя зарплата")
         tabs.addTab(self._create_profile_tab(), "Профиль")
 
+        # Сборка layout
         central = QWidget()
         lay = QVBoxLayout(central)
+        # верхняя панель с кнопкой logout
+        top_h = QHBoxLayout()
+        top_h.addStretch()
+        top_h.addWidget(btn_logout)
+        lay.addLayout(top_h)
+        # затем сами вкладки
         lay.addWidget(tabs)
         self.setCentralWidget(central)
+
+    def _on_logout(self):
+        """Эмитируем сигнал смены пользователя — закроется окно."""
+        self.logout_requested.emit()
 
     def _create_salary_tab(self) -> QWidget:
         w    = QWidget()
@@ -129,14 +151,12 @@ class EmployeeWindow(QMainWindow):
         vlay.addWidget(QLabel(f"Должность: {self.user.position}"))
         vlay.addSpacing(15)
 
-        # Отправка нового сообщения
-        # Получаем всех бухгалтеров
+        # Отправка сообщения бухгалтеру
         self.buhgalters = (
             self.db.query(Employee)
             .filter(Employee.position.ilike("%бухгалтер%"))
             .all()
         )
-
         vlay.addWidget(QLabel("Выберите бухгалтера:"))
         self.buhgalter_cb = QComboBox()
         for b in self.buhgalters:
@@ -179,7 +199,6 @@ class EmployeeWindow(QMainWindow):
         if not text:
             QMessageBox.warning(self, "Ошибка", "Введите сообщение")
             return
-        # ---- ИСКОРРЕКТИРОВАННЫЙ ФИЛЬТР: ищем должность «Бухгалтер» ----
         admin_id = self.buhgalter_cb.currentData()
         admin = self.db.query(Employee).get(admin_id)
         if not admin:
@@ -198,7 +217,6 @@ class EmployeeWindow(QMainWindow):
         self._refresh_chat()
 
     def _refresh_chat(self):
-        # ---- ИСКОРРЕКТИРОВАННЫЙ ФИЛЬТР: ищем должность «Бухгалтер» ----
         admin_id = self.buhgalter_cb.currentData()
         admin = self.db.query(Employee).get(admin_id)
         if not admin:
